@@ -1,8 +1,6 @@
 import curses
 import os
 import json
-import colorama
-import time
 from typing import cast
 from task import Task, TaskManager, serialize_task, deserialize_task
 from envutils import ADict
