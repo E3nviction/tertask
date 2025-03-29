@@ -79,6 +79,8 @@ class Task:
 		self.checked = False
 		self._updated_at = curr_time()
 		return self
+	def update(self) -> None:
+		self._updated_at = curr_time()
 
 	def __len__(self) -> int:
 		return len(self.title)
@@ -126,6 +128,17 @@ class TaskManager:
 	def prev(self) -> None:
 		if len(self.tasks) == 0: return
 		self.selected = (self.selected - 1) % len(self.tasks)
+
+	def move_task(self, idx: int, new_idx: int) -> None:
+		if new_idx < 0 or new_idx >= len(self.tasks): return
+		self._tasks.insert(new_idx, self._tasks.pop(idx))
+		self.selected = new_idx
+		self._tasks[new_idx].update()
+
+	def load_serialized_tasks(self, tasks: list[dict]) -> None:
+		self._tasks = [deserialize_task(task) for task in tasks]
+	def serialize_tasks(self) -> list[dict]:
+		return [serialize_task(task) for task in self.tasks]
 
 	def _bulk_add(self, tasks: list[Task]) -> None:
 		for task in tasks: self._add(task)

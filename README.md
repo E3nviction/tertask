@@ -52,7 +52,9 @@ python main.py
 | `r`         | Rename task       |
 | `a`         | Add new task      |
 | `d`         | Delete task       |
+| `⏎`         | Move task         |
 | `s`         | Save tasks        |
+| `:`         | Open command line |
 
 ### Adding a Task
 
