@@ -93,6 +93,8 @@ class TaskManager:
 	def __init__(self) -> None:
 		self._tasks = []
 		self._selected = 0
+		self.scroll_y = 0
+		self.max_items = 27
 
 	@property
 	def selected(self) -> int: return self._selected
@@ -103,13 +105,18 @@ class TaskManager:
 	@property
 	def active_tasks(self) -> list[Task]: return [task for task in self._tasks if not task.deleted]
 	@property
-	def tasks(self) -> list[Task]: return self.active_tasks
+	def tasks(self) -> list[Task]: return self.active_tasks[self.scroll_y:self.scroll_y+self.max_items]
 
 	@selected.setter
 	def selected(self, idx: int) -> None: self._selected = idx
 
 	@tasks.setter
-	def tasks(self, tasks: list[Task]) -> None: self._tasks = tasks
+	def tasks(self, tasks: list[Task]) -> None: self.active_tasks[self.scroll_y:self.scroll_y+self.max_items] = tasks
+
+	@active_tasks.setter
+	def active_tasks(self, tasks: list[Task]) -> None:
+		tasks.extend(self.deleted_tasks)
+		self._tasks = tasks
 
 	def __len__(self) -> int: return len(self.tasks)
 
@@ -124,37 +131,58 @@ class TaskManager:
 
 	def next(self) -> None:
 		if len(self.tasks) == 0: return
-		self.selected = (self.selected + 1) % len(self.tasks)
+		if self.selected + 1 >= len(self.tasks) and not (self.selected + 1 + self.scroll_y >= len(self.active_tasks)):
+			excess = ((self.selected + 1) - len(self.tasks)) + 1
+			self.scroll_y += excess
+		elif self.selected + 1 + self.scroll_y >= len(self.active_tasks):
+			self.scroll_y = 0
+			self.selected = 0
+		else:
+			self.selected = (self.selected + 1) % len(self.tasks)
 	def prev(self) -> None:
 		if len(self.tasks) == 0: return
-		self.selected = (self.selected - 1) % len(self.tasks)
+		if self.selected - 1 < 0:
+			if self.scroll_y > 0:
+				self.scroll_y -= 1
+			else:
+				if len(self.active_tasks) > self.max_items:
+					self.scroll_y = len(self.active_tasks) - self.max_items
+				else:
+					self.scroll_y = 0
+				self.selected = len(self.tasks) - 1
+		else:
+			self.selected = (self.selected - 1) % len(self.tasks)
 
 	def move_task(self, idx: int, new_idx: int) -> None:
 		if new_idx < 0 or new_idx >= len(self.tasks): return
-		self._tasks.insert(new_idx, self._tasks.pop(idx))
+		self._tasks.insert(new_idx + self.scroll_y, self._tasks.pop(idx + self.scroll_y))
 		self.selected = new_idx
-		self._tasks[new_idx].update()
+		self.active_tasks[new_idx].update()
 
 	def load_serialized_tasks(self, tasks: list[dict]) -> None:
 		self._tasks = [deserialize_task(task) for task in tasks]
 	def serialize_tasks(self) -> list[dict]:
-		return [serialize_task(task) for task in self.tasks]
+		return [serialize_task(task) for task in self._tasks]
 
 	def _bulk_add(self, tasks: list[Task]) -> None:
 		for task in tasks: self._add(task)
 		self.selected = len(self.tasks) - 1
-		self.tasks = self.tasks
 	def _bulk_remove(self, taskidxs: list[int]) -> None:
 		for task in taskidxs: self._remove(task)
 
 	def select_task(self, idx: int) -> None:
 		self.selected = idx
 		if idx == -1:
+			if len(self.active_tasks) > self.max_items:
+				self.scroll_y = len(self.active_tasks) - self.max_items
+			else:
+				self.scroll_y = 0
 			self.selected = len(self.tasks) - 1
 
 	@property
 	def current_task(self) -> Task:
 		if len(self.tasks) == 0: return Task("No tasks found", False, "No tasks found")
+		if self.selected >= len(self.tasks): self.prev()
 		return self.tasks[self.selected]
 
 def serialize_task(task) -> dict:

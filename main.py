@@ -4,18 +4,20 @@ import json
 import sys
 from re import T
 from typing import cast
-from task import Task, TaskManager, serialize_task, deserialize_task
+from task import Task, TaskManager, serialize_task
 from envutils import ADict
 
 EVENTS = [
 	"next task",
 	"prev task",
 	"quit",
+	"force quit"
 	"toggle task",
 	"help menu",
 	"rename task",
 	"add task",
 	"delete task",
+	"force delete task",
 	"save tasks",
 	"move task",
 	"special:arrow pressed",
@@ -25,11 +27,13 @@ EVENTS = [
 settings = ADict(
 	keybindings={
 		"q": ["quit"],
+		"Q": ["force quit"],
 		" ": ["toggle task"],
 		"h": ["help menu"],
 		"r": ["rename task"],
 		"a": ["add task"],
 		"d": ["delete task"],
+		"D": ["force delete task"],
 		"s": ["save tasks"],
 
 		":": ["command"],
@@ -61,6 +65,8 @@ class Application:
 		self.rename_mode = False
 		self.move_mode   = False
 		self.command_mode = False
+
+
 
 		self.save_path = os.path.join(os.path.expanduser("~"),".config/tertask/tasks.json")
 		self.load()
@@ -101,18 +107,19 @@ class Application:
 		if settings.show_current_mode: self.add_string(mode, self.width - (len(mode)+1), self.height - 1, curses.color_pair(4), move=False)
 		if page == 1:
 			text = [
-				" :                — Open command line",
+				" :                  — Open command line",
 				" ---------------------------------------",
-				" q                — quit",
-				" q!               — quit without saving",
-				" w                — save tasks",
-				" wq               — save tasks and quit",
-				" export <file>    — export tasks to file",
-				" rename <name...> — rename task",
-				" delete           — delete task",
-				" move             — move task",
-				" a | add          — add task",
-				" h | help         — show this help menu",
+				" q                  — quit",
+				" q!                 — quit without saving",
+				" w                  — save tasks",
+				" wq                 — save tasks and quit",
+				" export <file>      — export tasks to file",
+				" rename <name...>   — rename task",
+				" delete             — delete task",
+				" describe <desc...> — set task description",
+				" move               — move task",
+				" a | add            — add task",
+				" h | help           — show this help menu",
 			]
 			self.stdscr.addstr(4, 2, " Commands: ", curses.A_BOLD)
 			self.stdscr.addstr(5, 4, "\n    ".join(text))
@@ -240,21 +247,25 @@ class Application:
 			curses.init_pair(4, curses.COLOR_WHITE, -1) # message
 			curses.init_pair(5, 235, -1) # shadow
 			curses.init_pair(6, curses.COLOR_WHITE, -1) # red
+		try:
+			while True:
+				self.render()
+				key = self.stdscr.getch()
+				self.custom_message = ""
+				self.custom_type = "info"
 
-		while True:
-			self.render()
-			key = self.stdscr.getch()
-			self.custom_message = ""
-			self.custom_type = "info"
-
-			whitelist = []
-			use_whitelist = True if self.rename_mode or self.move_mode else False
-			if self.rename_mode:
-				whitelist = ["rename task"]
-			if self.move_mode:
-				whitelist = ["move task"]
-			actions = self.check_keys(key, whitelist=whitelist, use_whitelist=use_whitelist)
-			self.handle_actions(actions)
+				whitelist = []
+				use_whitelist = True if self.rename_mode or self.move_mode else False
+				if self.rename_mode:
+					whitelist = ["rename task"]
+				if self.move_mode:
+					whitelist = ["move task"]
+				actions = self.check_keys(key, whitelist=whitelist, use_whitelist=use_whitelist)
+				self.handle_actions(actions)
+		except Exception as e:
+			print("Unexpected error:", e)
+			print("Do you want to save your tasks? (Y/n) ", end="")
+			if input().lower() != "n": self.save()
 
 	def handle_actions(self, actions: list[str], extended: bool=False, only_extended: bool=False) -> None:
 		for action in actions:
@@ -271,6 +282,9 @@ class Application:
 					if not self.has_saved_tasks() and settings.prompt_unsaved:
 						if self.prompt(2, self.height - 1, "You have unsaved tasks. Do you want to save them? (Y/n) ", curses.color_pair(1), True).lower() != "n": self.save()
 					exit(0)
+				elif action == "force quit":
+					self.save()
+					exit(0)
 				elif action == "toggle task":
 					self.tm.current_task.toggle()
 				elif action == "add task":
@@ -281,7 +295,8 @@ class Application:
 					if settings.prompt_delete:
 						if self.prompt(2, self.height - 1, "Are you sure? (y/N) ", curses.color_pair(1), True).lower() != "y": break
 					self.tm.current_task.delete()
-					self.tm.prev()
+				elif action == "force delete task":
+					self.tm.current_task.delete()
 				elif action == "save tasks":
 					self.custom_message = "Saved tasks..."
 					self.save()
@@ -331,7 +346,6 @@ class Application:
 						self.custom_message = f"Deleted task '{self.tm.current_task.title}'."
 						self.custom_type = "info"
 						self.tm.current_task.delete()
-						self.tm.prev()
 					case "move":
 						self.move_mode = True
 					case "a" | "add":
@@ -342,6 +356,14 @@ class Application:
 						pass
 					case "h" | "help":
 						self.show_help()
+					case "describe":
+						if len(actions) > 1:
+							self.custom_message = f"Set Description for Task."
+							self.custom_type = "info"
+							self.tm.current_task.description = " ".join(actions[1:])
+						else:
+							self.custom_type = "error"
+							self.custom_message = "Error: missing argument -> :describe <new description...>"
 					case _:
 						self.custom_type = "error"
 						self.custom_message = "Error: unknown command"
@@ -365,7 +387,7 @@ class Application:
 		os.write(sys.stdout.fileno(), bytes(sequence, 'utf-8'))
 
 	def draw_task(self, x: int, y: int, task: Task, selected: bool=False, attr: int=curses.A_NORMAL) -> None:
-		self.stdscr.addstr(y, x, f"{task.mark} {task}", curses.color_pair(3) | attr if selected else attr)
+		self.stdscr.addstr(y, x, f"{task.mark} {str(task.title)}", curses.color_pair(3) | attr if selected else attr)
 
 	def check_key(self, key: int, action: str, is_not_disabled: bool) -> list[str]:
 		return self.keyevent(key) if (action in self.keyevent(key) and is_not_disabled) else [""]
@@ -379,7 +401,7 @@ class Application:
 
 	def has_saved_tasks(self) -> bool:
 		old_tasks = self.open_json(self.save_path)
-		new_tasks = [serialize_task(task) for task in self.tm.tasks]
+		new_tasks = [serialize_task(task) for task in self.tm._tasks]
 		return str(old_tasks) == str(new_tasks)
 
 	def input(self, x: int, y: int, prompt_string: str, attr: int, starting_offset: int=0, offset: int=3, prompt_attr: int=curses.A_NORMAL, placeholder: str="", placeholder_attr: int|None=None) -> str:
