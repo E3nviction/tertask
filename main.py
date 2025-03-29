@@ -11,7 +11,7 @@ EVENTS = [
 	"next task",
 	"prev task",
 	"quit",
-	"force quit"
+	"force quit",
 	"toggle task",
 	"help menu",
 	"rename task",
@@ -147,7 +147,6 @@ class Application:
 
 	def render(self, only_render: bool=False) -> None:
 		self.stdscr.clear()
-		height, width = self.stdscr.getmaxyx()
 
 		# Task list
 		for idx, task in enumerate(self.tm.tasks):
@@ -194,17 +193,17 @@ class Application:
 			first_keybind_add_task = [keybind for keybind in settings.keybindings if settings.keybindings[keybind] == "add task"][0]
 			self.stdscr.addstr(2, 2, f"No tasks available. Press '{first_keybind_add_task}' to add a new task.")
 		# Top bar
-		title = " TerTask - 'h' for help ".ljust(width, " ")
+		title = " TerTask - 'h' for help ".ljust(self.width, " ")
 		if not settings.show_help_message:
-			title = " TerTask ".ljust(width, " ")
+			title = " TerTask ".ljust(self.width, " ")
 		self.stdscr.addstr(0, 0, title, curses.A_BOLD)
-		self.stdscr.addstr(1, 0, "─" * width)
+		self.stdscr.addstr(1, 0, "─" * self.width)
 
 		color = curses.color_pair(1)
 		if self.custom_type == "info": color = curses.color_pair(3)
 		elif self.custom_type == "warning": color = curses.color_pair(4)
 		elif self.custom_type == "error": color = curses.color_pair(6)
-		self.stdscr.addstr(0, width - len(self.custom_message) - 1, self.custom_message, color)
+		self.stdscr.addstr(0, self.width - len(self.custom_message) - 1, self.custom_message, color)
 
 		# Bottom bar
 		mode = "Normal"
@@ -214,14 +213,14 @@ class Application:
 		if settings.show_current_mode: self.add_string(mode, self.width - (len(mode)+1), self.height - 1, curses.color_pair(4), move=False)
 
 		# Description panel
-		self.stdscr.addstr(height - 7, 0, "─" * width)
+		self.stdscr.addstr(self.height - 7, 0, "─" * self.width)
 		if settings.info.description:
-			self.stdscr.addstr(height - 6, 2, "Description: ")
-			self.stdscr.addstr(height - 5, 2, self.tm.current_task.description)
+			self.stdscr.addstr(self.height - 6, 2, "Description: ")
+			self.stdscr.addstr(self.height - 5, 2, self.tm.current_task.description)
 
 		# Footer with created/modified info
-		if settings.info.created_at: self.stdscr.addstr(height - 3, 2, f"Created: {self.tm.current_task.created_at} ")
-		if settings.info.modified_at: self.stdscr.addstr(height - 2, 2, f"Modified: {self.tm.current_task.modified_at} ")
+		if settings.info.created_at: self.stdscr.addstr(self.height - 3, 2, f"Created: {self.tm.current_task.created_at} ")
+		if settings.info.modified_at: self.stdscr.addstr(self.height - 2, 2, f"Modified: {self.tm.current_task.modified_at} ")
 
 	def main_loop(self, stdscr: curses.window) -> None:
 		self.stdscr = stdscr
@@ -249,6 +248,7 @@ class Application:
 			curses.init_pair(6, curses.COLOR_WHITE, -1) # red
 		try:
 			while True:
+				self.tm.max_items = self.height - 9
 				self.render()
 				key = self.stdscr.getch()
 				self.custom_message = ""
@@ -405,13 +405,12 @@ class Application:
 		return str(old_tasks) == str(new_tasks)
 
 	def input(self, x: int, y: int, prompt_string: str, attr: int, starting_offset: int=0, offset: int=3, prompt_attr: int=curses.A_NORMAL, placeholder: str="", placeholder_attr: int|None=None) -> str:
-		_, width = self.stdscr.getmaxyx()
 		self.add_string(prompt_string, x, y, attr)
 		self.request_input()
 		self.stdscr.attron(prompt_attr)
 		if placeholder_attr is None: placeholder_attr = curses.color_pair(5)
 		self.add_string(placeholder, x + len(prompt_string) + starting_offset, y, placeholder_attr, offset)
-		answer = self.stdscr.getstr(y, x + len(prompt_string) + starting_offset, width - len(prompt_string) - offset).decode("utf-8")
+		answer = self.stdscr.getstr(y, x + len(prompt_string) + starting_offset, self.width - len(prompt_string) - offset).decode("utf-8")
 		self.stdscr.attroff(prompt_attr)
 		self.stop_input()
 		return answer
