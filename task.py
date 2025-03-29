@@ -12,6 +12,7 @@ class Task:
 		self._updated_at = curr_time()
 		self._deleted = False
 		self.id = _id
+		self.index = 0
 
 	@property
 	def mark(self) -> str: return "✓" if self.checked else "✕"
@@ -37,6 +38,8 @@ class Task:
 	def is_deleted(self) -> bool: return self.deleted
 	@property
 	def completed(self) -> bool: return self.checked
+	@property
+	def is_completed(self) -> bool: return self.checked
 
 	@mark.setter
 	def mark(self, mark: str) -> None: self.checked = (mark == "✓")
@@ -79,8 +82,17 @@ class Task:
 		self.checked = False
 		self._updated_at = curr_time()
 		return self
-	def update(self) -> None:
+	def update(self) -> "Task":
 		self._updated_at = curr_time()
+		return self
+	def complete(self) -> "Task":
+		self.checked = True
+		self._updated_at = curr_time()
+		return self
+	def uncomplete(self) -> "Task":
+		self.checked = False
+		self._updated_at = curr_time()
+		return self
 
 	def __len__(self) -> int:
 		return len(self.title)
@@ -108,15 +120,20 @@ class TaskManager:
 	def tasks(self) -> list[Task]: return self.active_tasks[self.scroll_y:self.scroll_y+self.max_items]
 
 	@selected.setter
-	def selected(self, idx: int) -> None: self._selected = idx
+	def selected(self, idx: int) -> None:
+		self._selected = idx
+		self._index_tasks()
 
 	@tasks.setter
-	def tasks(self, tasks: list[Task]) -> None: self.active_tasks[self.scroll_y:self.scroll_y+self.max_items] = tasks
+	def tasks(self, tasks: list[Task]) -> None:
+		self.active_tasks[self.scroll_y:self.scroll_y+self.max_items] = tasks
+		self._index_tasks()
 
 	@active_tasks.setter
 	def active_tasks(self, tasks: list[Task]) -> None:
 		tasks.extend(self.deleted_tasks)
 		self._tasks = tasks
+		self._index_tasks()
 
 	def __len__(self) -> int: return len(self.tasks)
 
@@ -125,9 +142,12 @@ class TaskManager:
 	def remove(self, idx: int) -> None:
 		self._remove(idx)
 
-	def _add(self, task: Task) -> None: self._tasks.append(task)
+	def _add(self, task: Task) -> None:
+		self._tasks.append(task)
+		self._index_tasks()
 	def _remove(self, idx: int) -> None:
 		self._tasks[idx].delete()
+		self._index_tasks()
 
 	def next(self) -> None:
 		if len(self.tasks) == 0: return
@@ -139,6 +159,7 @@ class TaskManager:
 			self.selected = 0
 		else:
 			self.selected = (self.selected + 1) % len(self.tasks)
+		self._index_tasks()
 	def prev(self) -> None:
 		if len(self.tasks) == 0: return
 		if self.selected - 1 < 0:
@@ -152,23 +173,28 @@ class TaskManager:
 				self.selected = len(self.tasks) - 1
 		else:
 			self.selected = (self.selected - 1) % len(self.tasks)
+		self._index_tasks()
 
 	def move_task(self, idx: int, new_idx: int) -> None:
 		if new_idx < 0 or new_idx >= len(self.tasks): return
 		self._tasks.insert(new_idx + self.scroll_y, self._tasks.pop(idx + self.scroll_y))
 		self.selected = new_idx
 		self.active_tasks[new_idx].update()
+		self._index_tasks()
 
 	def load_serialized_tasks(self, tasks: list[dict]) -> None:
 		self._tasks = [deserialize_task(task) for task in tasks]
+		self._index_tasks()
 	def serialize_tasks(self) -> list[dict]:
 		return [serialize_task(task) for task in self._tasks]
 
 	def _bulk_add(self, tasks: list[Task]) -> None:
 		for task in tasks: self._add(task)
 		self.selected = len(self.tasks) - 1
+		self._index_tasks()
 	def _bulk_remove(self, taskidxs: list[int]) -> None:
 		for task in taskidxs: self._remove(task)
+		self._index_tasks()
 
 	def select_task(self, idx: int) -> None:
 		self.selected = idx
@@ -178,12 +204,22 @@ class TaskManager:
 			else:
 				self.scroll_y = 0
 			self.selected = len(self.tasks) - 1
+		self._index_tasks()
+
+	def get(self, idx: int) -> Task:
+		if len(self.tasks) == 0: return Task("No tasks found", False, "No tasks found")
+		if idx >= len(self.tasks): return self.current_task
+		return self.tasks[idx]
 
 	@property
 	def current_task(self) -> Task:
 		if len(self.tasks) == 0: return Task("No tasks found", False, "No tasks found")
 		if self.selected >= len(self.tasks): self.prev()
 		return self.tasks[self.selected]
+
+	def _index_tasks(self) -> None:
+		for idx, task in enumerate(self.tasks):
+			task.index = idx
 
 def serialize_task(task) -> dict:
 	return {

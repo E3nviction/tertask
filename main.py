@@ -53,6 +53,7 @@ settings = ADict(
 	show_current_mode=True,
 	prompt_unsaved=True,
 	prompt_delete=True,
+	show_index=True,
 	info=ADict(
 		description=True,
 		created_at=True,
@@ -86,7 +87,7 @@ class Application:
 	def save(self) -> None:
 		with open(self.save_path, "w") as f:
 			f.truncate(0)
-			f.write(json.dumps([serialize_task(task) for task in self.tm.tasks]))
+			f.write(json.dumps([serialize_task(task) for task in self.tm._tasks]))
 
 	def keyevent(self, key: str | int) -> list[str]:
 		for skey in settings.keybindings:
@@ -117,6 +118,7 @@ class Application:
 				" rename <name...>   — rename task",
 				" delete             — delete task",
 				" describe <desc...> — set task description",
+				" run <python code>  — run python code",
 				" move               — move task",
 				" a | add            — add task",
 				" h | help           — show this help menu",
@@ -187,6 +189,10 @@ class Application:
 					self.draw_task(x, y, task, selected=True)
 					if not settings.use_colors:
 						self.draw_task(x, y, task, selected=True, attr=curses.A_REVERSE)
+					string = f"{task.mark} {task.title}"
+					if settings.show_index:
+						string += f" == {task.index}"
+					self.add_string(string, x, y, curses.color_pair(3))
 			else: self.draw_task(x, y, task, attr=is_completed_attr)
 		if len(self.tm.tasks) == 0:
 		# if no tasks exist
@@ -330,7 +336,7 @@ class Application:
 							self.custom_type = "info"
 							with open(actions[1], "w") as f:
 								f.truncate(0)
-								f.write(json.dumps([serialize_task(task) for task in self.tm.tasks]))
+								f.write(json.dumps([serialize_task(task) for task in self.tm._tasks]))
 						else:
 							self.custom_type = "error"
 							self.custom_message = "Error: missing argument -> :export <file>"
@@ -364,6 +370,19 @@ class Application:
 						else:
 							self.custom_type = "error"
 							self.custom_message = "Error: missing argument -> :describe <new description...>"
+					case "run":
+						if len(actions) > 1:
+							self.custom_message = f"Executed Python Code."
+							self.custom_type = "info"
+							def info(*args: str): self.custom_message = " ".join([str(arg) for arg in args])
+							try:
+								exec(" ".join(actions[1:]), {"tasks": self.tm.tasks, "deleted_tasks": self.tm.deleted_tasks, "current_task": self.tm.current_task, "tm": self.tm, "info": info, "delete": self.tm._remove, "tasks_len": len(self.tm.tasks.copy())})
+							except Exception as e:
+								self.custom_type = "error"
+								self.custom_message = f"Error: {e}"
+						else:
+							self.custom_type = "error"
+							self.custom_message = "Error: missing argument -> :run <python code...>"
 					case _:
 						self.custom_type = "error"
 						self.custom_message = "Error: unknown command"
