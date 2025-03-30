@@ -21,7 +21,8 @@ EVENTS = [
 	"save tasks",
 	"move task",
 	"special:arrow pressed",
-	"command"
+	"command",
+	"trash menu",
 ]
 
 settings = ADict(
@@ -35,6 +36,7 @@ settings = ADict(
 		"d": ["delete task"],
 		"D": ["force delete task"],
 		"s": ["save tasks"],
+		"t": ["trash menu"],
 
 		":": ["command"],
 		"e": ["command"],
@@ -66,8 +68,7 @@ class Application:
 		self.rename_mode = False
 		self.move_mode   = False
 		self.command_mode = False
-
-
+		self.trash_mode = False
 
 		self.save_path = os.path.join(os.path.expanduser("~"),".config/tertask/tasks.json")
 		self.load()
@@ -98,6 +99,7 @@ class Application:
 				if not is_int and key == ord(skey): actions_to_return.append(actions)
 			if actions_to_return: return actions_to_return
 		return [""]
+
 	def show_help(self, page: int=1) -> None:
 		self.stdscr.clear()
 		self.stdscr.addstr(1, 2, " Help Menu - Press 'q' to return ", curses.A_BOLD | curses.A_REVERSE)
@@ -110,18 +112,20 @@ class Application:
 			text = [
 				" :                  — Open command line",
 				" ---------------------------------------",
-				" q                  — quit",
-				" q!                 — quit without saving",
-				" w                  — save tasks",
-				" wq                 — save tasks and quit",
-				" export <file>      — export tasks to file",
-				" rename <name...>   — rename task",
-				" delete             — delete task",
-				" describe <desc...> — set task description",
-				" run <python code>  — run python code",
-				" move               — move task",
-				" a | add            — add task",
-				" h | help           — show this help menu",
+				" q                          — quit",
+				" q!                         — quit without saving",
+				" w                          — save tasks",
+				" wq                         — save tasks and quit",
+				" export <file>                — export tasks to file",
+				" rename | rn <name...>      — rename task",
+				" delete | del | d <task id> — delete task",
+				" describe | desc <desc...>  — set task description",
+				" run <python code>          — run python code",
+				" move mode | mm             — move task",
+				" a | add                    — add task",
+				" h | help                   — show this help menu",
+				" recover | rev <task id>    — recover a deleted task",
+				" burn <task id>             — delete a task forever",
 			]
 			self.stdscr.addstr(4, 2, " Commands: ", curses.A_BOLD)
 			self.stdscr.addstr(5, 4, "\n    ".join(text))
@@ -149,6 +153,22 @@ class Application:
 
 	def render(self, only_render: bool=False) -> None:
 		self.stdscr.clear()
+
+		# Trash menu
+		if self.trash_mode:
+			self.stdscr.addstr(1, 2, " Trash Menu - Press 't' to return ", curses.A_BOLD | curses.A_REVERSE)
+			if not self.tm.deleted_tasks:
+				self.stdscr.addstr(2, 2, "No deleted tasks available.")
+			else:
+				self.stdscr.addstr(2, 2, "use :recover <task id> to recover a task or :burn <task id> to delete a task forever")
+				for idx, task in enumerate(self.tm.deleted_tasks):
+					task = cast(Task, task) # convert to Task object
+					x = 2
+					y = 3 + idx
+					is_completed_attr = curses.color_pair(2) if task.completed else curses.A_NORMAL
+					self.draw_task(x, y, task, attr=is_completed_attr)
+					self.add_string(f"{task.index} {task.mark} {task.title} — {task.description:20}", x, y, curses.color_pair(3))
+			return
 
 		# Task list
 		for idx, task in enumerate(self.tm.tasks):
@@ -216,6 +236,7 @@ class Application:
 		if self.rename_mode: mode = "Rename"
 		elif self.move_mode: mode = "Move"
 		elif self.command_mode: mode = "Command"
+		elif self.trash_mode: mode = "Trash"
 		if settings.show_current_mode: self.add_string(mode, self.width - (len(mode)+1), self.height - 1, curses.color_pair(4), move=False)
 
 		# Description panel
@@ -300,9 +321,9 @@ class Application:
 				elif action == "delete task":
 					if settings.prompt_delete:
 						if self.prompt(2, self.height - 1, "Are you sure? (y/N) ", curses.color_pair(1), True).lower() != "y": break
-					self.tm.current_task.delete()
+					self.tm.delete_current_task()
 				elif action == "force delete task":
-					self.tm.current_task.delete()
+					self.tm.delete_current_task()
 				elif action == "save tasks":
 					self.custom_message = "Saved tasks..."
 					self.save()
@@ -314,6 +335,10 @@ class Application:
 					self.command_mode = False
 				elif action == "help menu":
 					self.show_help()
+				elif action == "trash menu":
+					self.trash_mode = not self.trash_mode
+					self.tm.selected = 0
+					self.render()
 			if extended:
 				actions = action.split(" ")
 				action = actions[0]
@@ -340,7 +365,7 @@ class Application:
 						else:
 							self.custom_type = "error"
 							self.custom_message = "Error: missing argument -> :export <file>"
-					case "rename":
+					case "rename" | "rn":
 						if len(actions) > 1:
 							self.custom_message = f"Renamed task '{self.tm.current_task.title}' to '{" ".join(actions[1:])}'."
 							self.custom_type = "info"
@@ -348,21 +373,34 @@ class Application:
 						else:
 							self.custom_type = "error"
 							self.custom_message = "Error: missing argument -> :rename <new name...>"
-					case "delete":
-						self.custom_message = f"Deleted task '{self.tm.current_task.title}'."
-						self.custom_type = "info"
-						self.tm.current_task.delete()
-					case "move":
+					case "delete" | "d" | "del":
+						if len(actions) > 1:
+							self.custom_message = f"Deleted task '{self.tm.get(int(actions[1])).title}'."
+							self.custom_type = "info"
+							self.tm.delete_task(int(actions[1]))
+						else:
+							self.custom_message = f"Deleted task '{self.tm.current_task.title}'."
+							self.custom_type = "info"
+							self.tm.delete_current_task()
+					case "move mode" | "mm":
 						self.move_mode = True
 					case "a" | "add":
-						self.tm.add("New Task")
-						self.tm.select_task(-1)
-						self.rename_mode = True
+						if len(actions) > 1:
+							self.custom_message = f"Added task '{' '.join(actions[1:])}'"
+							self.custom_type = "info"
+							self.tm.add(" ".join(actions[1:]))
+							self.tm.select_task(-1)
+						else:
+							self.custom_message = f"Added task 'New Task'"
+							self.custom_type = "info"
+							self.tm.add("New Task")
+							self.tm.select_task(-1)
+							self.rename_mode = True
 					case "":
 						pass
 					case "h" | "help":
 						self.show_help()
-					case "describe":
+					case "describe" | "desc":
 						if len(actions) > 1:
 							self.custom_message = f"Set Description for Task."
 							self.custom_type = "info"
@@ -383,6 +421,34 @@ class Application:
 						else:
 							self.custom_type = "error"
 							self.custom_message = "Error: missing argument -> :run <python code...>"
+					case "recover" | "rev":
+						try:
+							task_id = int(actions[1])
+							for task in self.tm.deleted_tasks:
+								if task.index == task_id:
+									task.restore()
+									self.tm._index_tasks()
+									self.render()
+									return
+							self.custom_type = "error"
+							self.custom_message = "Task not found"
+						except (IndexError, ValueError):
+							self.custom_type = "error"
+							self.custom_message = "Invalid task ID"
+					case "burn":
+						try:
+							task_id = int(actions[1])
+							for idx, task in enumerate(self.tm._tasks):
+								if task.index == task_id:
+									self.tm._tasks.pop(idx)
+									self.render()
+									return
+							self.custom_type = "error"
+							self.custom_message = "Task not found"
+						except (IndexError, ValueError):
+							self.custom_type = "error"
+							self.custom_message = "Invalid task ID"
+							return
 					case _:
 						self.custom_type = "error"
 						self.custom_message = "Error: unknown command"

@@ -146,7 +146,7 @@ class TaskManager:
 		self._tasks.append(task)
 		self._index_tasks()
 	def _remove(self, idx: int) -> None:
-		self._tasks[idx].delete()
+		self._tasks.pop(idx)
 		self._index_tasks()
 
 	def next(self) -> None:
@@ -206,6 +206,18 @@ class TaskManager:
 			self.selected = len(self.tasks) - 1
 		self._index_tasks()
 
+	def delete_current_task(self) -> None:
+		# Moves the task to the bottom
+		self.move_task(self.current_task.index, len(self.tasks) - 1)
+		self.get(len(self.tasks) - 1).delete()
+		self._index_tasks()
+
+	def delete_task(self, idx: int) -> None:
+		# Moves the task to the bottom
+		self.move_task(idx, len(self.tasks) - 1)
+		self.get(len(self.tasks) - 1).delete()
+		self._index_tasks()
+
 	def get(self, idx: int) -> Task:
 		if len(self.tasks) == 0: return Task("No tasks found", False, "No tasks found")
 		if idx >= len(self.tasks): return self.current_task
@@ -218,8 +230,12 @@ class TaskManager:
 		return self.tasks[self.selected]
 
 	def _index_tasks(self) -> None:
+		max_idx = len(self.tasks)
 		for idx, task in enumerate(self.tasks):
 			task.index = idx
+		# index deleted tasks
+		for idx, task in enumerate(self.deleted_tasks):
+			task.index = idx + max_idx
 
 def serialize_task(task) -> dict:
 	return {
